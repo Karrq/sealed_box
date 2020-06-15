@@ -4,8 +4,11 @@ use blake2::{
 };
 use crypto_box::{
     aead::{self, Aead},
-    PublicKey, SalsaBox, SecretKey,
+    SalsaBox,
 };
+
+//re-export keys
+pub use crypto_box::{PublicKey, SecretKey};
 
 const BOX_NONCELENGTH: usize = 24;
 // const BOX_OVERHEAD: usize = 16;
