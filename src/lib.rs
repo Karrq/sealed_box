@@ -11,7 +11,7 @@ use crypto_box::{
 pub use crypto_box::{PublicKey, SecretKey};
 
 const BOX_NONCELENGTH: usize = 24;
-// const BOX_OVERHEAD: usize = 16;
+const BOX_OVERHEAD: usize = 16;
 
 //32 = PublicKey length
 const SEALED_OVERHEAD: usize = 32 + BOX_OVERHEAD;
