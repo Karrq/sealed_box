@@ -8,16 +8,20 @@ use crypto_box::{
 };
 
 const BOX_NONCELENGTH: usize = 24;
-const BOX_OVERHEAD: usize = 16;
+// const BOX_OVERHEAD: usize = 16;
 
 //32 = PublicKey length
 const SEALED_OVERHEAD: usize = 32 + BOX_OVERHEAD;
 
-fn get_nonce(pk1: &PublicKey, pk2: &PublicKey) -> [u8; BOX_NONCELENGTH] {
+///generate the nonce for the given public keys
+///
+/// nonce = Blake2b(ephemeral_pk||target_pk)
+/// nonce_length = 24
+fn get_nonce(ephemeral_pk: &PublicKey, target_pk: &PublicKey) -> [u8; BOX_NONCELENGTH] {
     let mut hasher = VarBlake2b::new(BOX_NONCELENGTH).unwrap();
 
-    hasher.update(pk1.as_bytes());
-    hasher.update(pk2.as_bytes());
+    hasher.update(ephemeral_pk.as_bytes());
+    hasher.update(target_pk.as_bytes());
 
     let out = hasher.finalize_boxed();
 
@@ -27,6 +31,9 @@ fn get_nonce(pk1: &PublicKey, pk2: &PublicKey) -> [u8; BOX_NONCELENGTH] {
     array
 }
 
+///encrypts the given buffer for the given public key
+///
+/// overhead = 48 = (32 ephemeral_pk||16 box_overhead)
 pub fn seal(data: &[u8], pk: &PublicKey) -> Vec<u8> {
     let mut out = Vec::with_capacity(SEALED_OVERHEAD + data.len());
 
@@ -44,6 +51,8 @@ pub fn seal(data: &[u8], pk: &PublicKey) -> Vec<u8> {
     out
 }
 
+///attempt to decrypt the given ciphertext with the given secret key
+/// will fail if the secret key doesn't match the public key used to encrypt the payload
 pub fn open(ciphertext: &[u8], sk: &SecretKey) -> Option<Vec<u8>> {
     let pk = sk.public_key();
 
