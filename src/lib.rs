@@ -56,7 +56,13 @@ pub fn seal(data: &[u8], pk: &PublicKey) -> Vec<u8> {
 
 ///attempt to decrypt the given ciphertext with the given secret key
 /// will fail if the secret key doesn't match the public key used to encrypt the payload
+/// or if the ciphertext is not long enough
 pub fn open(ciphertext: &[u8], sk: &SecretKey) -> Option<Vec<u8>> {
+    if ciphertext.len() <= 32 {
+        //not long enough
+        return None;
+    }
+
     let pk = sk.public_key();
 
     let ephemeral_pk = {
@@ -173,5 +179,12 @@ mod tests {
         let sencrypted = sseal(&TEST_PAYLOAD[..], &sbob.0);
         let open_sodium = open(&sencrypted, &bob.1).unwrap();
         assert_eq!(&open_sodium, &TEST_PAYLOAD);
+    }
+
+    #[test]
+    fn bad_ciphertext() {
+        let key = SecretKey::generate(&mut rand::thread_rng());
+
+        assert_eq!(None, open(&[1, 2, 3], &key))
     }
 }
