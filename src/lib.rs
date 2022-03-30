@@ -1,11 +1,10 @@
 use blake2::{
-    digest::{Update, VariableOutput},
-    VarBlake2b,
+    digest::{generic_array::GenericArray, typenum},
+    Digest,
 };
-use crypto_box::{
-    aead::{self, Aead},
-    SalsaBox,
-};
+use crypto_box::{aead::Aead, SalsaBox};
+
+type Blake2b = blake2::Blake2b<typenum::U24>;
 
 //re-export keys
 pub use crypto_box::{PublicKey, SecretKey};
@@ -16,25 +15,20 @@ const BOX_OVERHEAD: usize = 16;
 //32 = PublicKey length
 const SEALED_OVERHEAD: usize = 32 + BOX_OVERHEAD;
 
-///generate the nonce for the given public keys
+/// Generate the nonce for the given public keys
 ///
 /// nonce = Blake2b(ephemeral_pk||target_pk)
 /// nonce_length = 24
 fn get_nonce(ephemeral_pk: &PublicKey, target_pk: &PublicKey) -> [u8; BOX_NONCELENGTH] {
-    let mut hasher = VarBlake2b::new(BOX_NONCELENGTH).unwrap();
+    let mut hasher = Blake2b::new();
 
     hasher.update(ephemeral_pk.as_bytes());
     hasher.update(target_pk.as_bytes());
 
-    let out = hasher.finalize_boxed();
-
-    let mut array = [0u8; BOX_NONCELENGTH];
-    array.copy_from_slice(&out);
-
-    array
+    *hasher.finalize().as_ref()
 }
 
-///encrypts the given buffer for the given public key
+/// Encrypts the given buffer for the given public key
 ///
 /// overhead = 48 = (32 ephemeral_pk||16 box_overhead)
 pub fn seal(data: &[u8], pk: &PublicKey) -> Vec<u8> {
@@ -44,17 +38,18 @@ pub fn seal(data: &[u8], pk: &PublicKey) -> Vec<u8> {
     let ep_pk = ep_sk.public_key();
     out.extend_from_slice(ep_pk.as_bytes());
 
-    let nonce = get_nonce(&ep_pk, &pk);
-    let nonce = aead::generic_array::GenericArray::from_slice(&nonce);
+    let nonce = get_nonce(&ep_pk, pk);
+    let nonce = GenericArray::from_slice(&nonce);
 
-    let salsabox = SalsaBox::new(&pk, &ep_sk);
-    let encrypted = salsabox.encrypt(&nonce, &data[..]).unwrap();
+    let salsabox = SalsaBox::new(pk, &ep_sk);
+    let encrypted = salsabox.encrypt(nonce, data).unwrap();
 
     out.extend_from_slice(&encrypted);
     out
 }
 
-///attempt to decrypt the given ciphertext with the given secret key
+/// Attempts to decrypt the given ciphertext with the given secret key
+///
 /// will fail if the secret key doesn't match the public key used to encrypt the payload
 /// or if the ciphertext is not long enough
 pub fn open(ciphertext: &[u8], sk: &SecretKey) -> Option<Vec<u8>> {
@@ -68,22 +63,23 @@ pub fn open(ciphertext: &[u8], sk: &SecretKey) -> Option<Vec<u8>> {
     let ephemeral_pk = {
         let bytes = &ciphertext[..32];
         let mut array = [0u8; 32];
-        array.copy_from_slice(&bytes);
+        array.copy_from_slice(bytes);
         array.into()
     };
 
     let nonce = get_nonce(&ephemeral_pk, &pk);
-    let nonce = aead::generic_array::GenericArray::from_slice(&nonce);
+    let nonce = GenericArray::from_slice(&nonce);
 
     let encrypted = &ciphertext[32..];
-    let salsabox = SalsaBox::new(&ephemeral_pk, &sk);
+    let salsabox = SalsaBox::new(&ephemeral_pk, sk);
 
-    salsabox.decrypt(&nonce, &encrypted[..]).ok()
+    salsabox.decrypt(nonce, encrypted).ok()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use blake2::digest::generic_array::GenericArray;
     use crypto_box::{SalsaBox, SecretKey};
 
     const TEST_PAYLOAD: &[u8; 15] = b"sealed_box test";
@@ -135,15 +131,12 @@ mod tests {
         //encrypt message with crypto_box
         let salsabox = SalsaBox::new(&bob.0, &alice.1);
         let encrypted = salsabox
-            .encrypt(
-                &aead::generic_array::GenericArray::from_slice(&nonce),
-                &TEST_PAYLOAD[..],
-            )
+            .encrypt(&GenericArray::from_slice(&nonce), &TEST_PAYLOAD[..])
             .unwrap();
 
         //encrypt message with sodiumoxide::box_
         let sbob_pkey = SodiumPKey::from_slice(bob.0.as_bytes()).unwrap();
-        let salice_skey = SodiumSKey::from_slice(&alice.1.to_bytes()).unwrap();
+        let salice_skey = SodiumSKey::from_slice(alice.1.as_bytes()).unwrap();
         let sencrypted = bs_seal(&TEST_PAYLOAD[..], &sodium_nonce, &sbob_pkey, &salice_skey);
 
         assert_eq!(sencrypted, encrypted);
@@ -162,7 +155,7 @@ mod tests {
         let sbob = {
             (
                 SodiumPKey::from_slice(bob.0.as_bytes()).unwrap(),
-                SodiumSKey::from_slice(&bob.1.to_bytes()).unwrap(),
+                SodiumSKey::from_slice(bob.1.as_bytes()).unwrap(),
             )
         };
 
